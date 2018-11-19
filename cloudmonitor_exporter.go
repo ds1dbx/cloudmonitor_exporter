@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/avct/user-agent-surfer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/version"
 )
@@ -31,15 +30,16 @@ var (
 	showVersion       = flag.Bool("version", false, "Show version information")
 )
 
+// 2018.11.19 - Add "httpResponseInCountry" for collect in country mapping ratio
 type Exporter struct {
 	sync.RWMutex
-	httpRequestsTotal, httpDeviceRequestsTotal, httpResponseContentEncodingTotal, httpGeoRequestsTotal, httpResponseBytesTotal, httpResponseContentTypesTotal, parseErrorsTotal, originRetriesTotal *prometheus.CounterVec
-	httpResponseLatency, httpOriginLatency                                                                                                                                                          *prometheus.SummaryVec
-	postSizeBytesTotal                                                                                                                                                                              prometheus.Counter
-	postProcessingTime, logLatency                                                                                                                                                                  prometheus.Summary
-	logWriter                                                                                                                                                                                       *bufio.Writer
-	logfile                                                                                                                                                                                         *os.File
-	writeAccesslog, logErrors                                                                                                                                                                       bool
+	httpRequestsTotal, httpDeviceRequestsTotal, httpResponseContentEncodingTotal, httpGeoRequestsTotal, httpResponseBytesTotal, httpResponseContentTypesTotal, parseErrorsTotal, originRetriesTotal, httpResponseInCountry *prometheus.CounterVec
+	httpResponseLatency, httpOriginLatency                                                                                                                                                                                 *prometheus.SummaryVec
+	postSizeBytesTotal                                                                                                                                                                                                     prometheus.Counter
+	postProcessingTime, logLatency                                                                                                                                                                                         prometheus.Summary
+	logWriter                                                                                                                                                                                                              *bufio.Writer
+	logfile                                                                                                                                                                                                                *os.File
+	writeAccesslog, logErrors                                                                                                                                                                                              bool
 }
 
 type CloudmonitorStruct struct {
@@ -55,7 +55,51 @@ type CloudmonitorStruct struct {
 	Performance PerformanceStruct `json:"netPerf"`
 	Network     NetworkStruct     `json:"network"`
 	Geo         GeoStruct         `json:"geo"`
+	Content     ContentStruct     `json:"content"` // 2018-11-19, Add ContentStruct for custom CM log
 }
+
+// 2018-11-19, BEGIN - Add Content Struct
+type ContentStruct struct {
+	Timestamp string         `json:"timestamp"`
+	Client    CustumClient   `json:"client"`
+	Edge      CustomEdge     `json:"edge"`
+	Download  CustomDownload `json:"download"`
+	Origin    CustomOrigin   `json:"origin"`
+}
+
+type CustumClient struct {
+	Country     string `json:"country"`
+	IP          string `json:"ip"`
+	UA          string `json:"ua"`
+	Asnum       string `json:"asnum"`
+	Network     string `json:"network"`
+	NetowrkType string `json:"network-type"`
+}
+
+type CustomEdge struct {
+	IsInCountry string `json:"is-in-country"`
+	IP          string `json:"ip"`
+	IsCached    string `json:"is-cahced"`
+}
+
+type CustomDownload struct {
+	Cpcode           string `json:"cpcode"`
+	Domain           string `json:"domain"`
+	Path             string `json:"path"`
+	StartTime        string `json:"start-time"`
+	TimeTaken        string `json:"time-taken"`
+	LastMileRTT      string `json:"lastmile-rtt"`
+	ReqEndTime       string `json:"req-end-time"`
+	ReqFirstByteTime string `json:"req-first-byte-time"`
+	Status           string `json:"status"`
+	RequestID        string `json:"request-id"`
+}
+
+type CustomOrigin struct {
+	FirstMileRtt string `json:"firstmile-rtt"`
+}
+
+// 2018-11-19, END - Add Content Struct
 
 type GeoStruct struct {
 	City      string `json:"city"`
@@ -249,6 +293,15 @@ func NewExporter(errors bool) *Exporter {
 			},
 			[]string{"host", "status_code", "protocol", "ip_version"},
 		),
+		// 2018.11.19 - Add "httpResponseInCountry"
+		httpResponseInCountry: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: *namespace,
+				Name:      "http_response_in_country",
+				Help:      "Total number of in country mapping logs",
+			},
+			[]string{"host", "client_ip", "edge_ip", "is_in_country"},
+		),
 		parseErrorsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: *namespace,
@@ -285,6 +338,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.parseErrorsTotal.Collect(ch)
 	e.httpResponseLatency.Collect(ch)
 	e.httpOriginLatency.Collect(ch)
+	e.httpResponseInCountry.Collect(ch) // 2018.11.19 - Add httpResponseInCountry
 
 	ch <- e.postProcessingTime
 	ch <- e.logLatency
@@ -302,6 +356,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	e.parseErrorsTotal.Describe(ch)
 	e.httpResponseLatency.Describe(ch)
 	e.httpOriginLatency.Describe(ch)
+	e.httpResponseInCountry.Describe(ch) // 2018.11.19 - Add httpResponseInCountry
 
 	ch <- e.postProcessingTime.Desc()
 	ch <- e.logLatency.Desc()
@@ -371,7 +426,8 @@ func (e *Exporter) OutputLogEntry(cloudmonitorData *CloudmonitorStruct) {
 		cloudmonitorData.Message.ProtocolVersion,
 		e.GetCacheString(cloudmonitorData.Performance.CacheStatus),
 		cloudmonitorData.Message.ResBytes,
-		cloudmonitorData.Message.UserAgent)
+		cloudmonitorData.Message.UserAgent
+		cloudmonitorData.ContentStruct.CustomEdge.IsInCountry)	// 2018.11.19 - Add IsInCountry field
 
 	if e.writeAccesslog == true {
 		fmt.Fprintf(e.logWriter, logentry)
@@ -549,6 +605,14 @@ func (e *Exporter) HandleCollectorPost(w http.ResponseWriter, r *http.Request) {
 			cloudmonitorData.Message.Protocol,
 			ipVersion,
 		).Add(float64(cloudmonitorData.Performance.OriginRetry) * multiplier)
+
+		// 2018.11.19 - Add httpResponseInCountry
+		e.httpResponseInCountry.WithLabelValues(
+			cloudmonitorData.Message.ReqHost,
+			cloudmonitorData.ContentStruct.CustomClient.IP,
+			cloudmonitorData.ContentStruct.CustomEdge.IP,
+			cloudmonitorData.ContentStruct.CustomEdge.IsInCountry,
+		).Add(multiplier)
 	}
 
 	duration := time.Since(begin)
