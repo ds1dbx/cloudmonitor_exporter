@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avct/uasurfer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/version"
 )
@@ -426,8 +427,8 @@ func (e *Exporter) OutputLogEntry(cloudmonitorData *CloudmonitorStruct) {
 		cloudmonitorData.Message.ProtocolVersion,
 		e.GetCacheString(cloudmonitorData.Performance.CacheStatus),
 		cloudmonitorData.Message.ResBytes,
-		cloudmonitorData.Message.UserAgent
-		cloudmonitorData.ContentStruct.CustomEdge.IsInCountry)	// 2018.11.19 - Add IsInCountry field
+		cloudmonitorData.Message.UserAgent,
+		cloudmonitorData.Content.Edge.IsInCountry) // 2018.11.19 - Add IsInCountry field
 
 	if e.writeAccesslog == true {
 		fmt.Fprintf(e.logWriter, logentry)
@@ -609,9 +610,9 @@ func (e *Exporter) HandleCollectorPost(w http.ResponseWriter, r *http.Request) {
 		// 2018.11.19 - Add httpResponseInCountry
 		e.httpResponseInCountry.WithLabelValues(
 			cloudmonitorData.Message.ReqHost,
-			cloudmonitorData.ContentStruct.CustomClient.IP,
-			cloudmonitorData.ContentStruct.CustomEdge.IP,
-			cloudmonitorData.ContentStruct.CustomEdge.IsInCountry,
+			cloudmonitorData.Content.Client.IP,
+			cloudmonitorData.Content.Edge.IP,
+			cloudmonitorData.Content.Edge.IsInCountry,
 		).Add(multiplier)
 	}
 
