@@ -80,7 +80,7 @@ type CustumClient struct {
 type CustomEdge struct {
 	IsInCountry string `json:"is-in-country"`
 	IP          string `json:"ip"`
-	IsCached    string `json:"is-cahced"`
+	IsCached    string `json:"is-cached"`
 }
 
 type CustomDownload struct {
@@ -301,7 +301,7 @@ func NewExporter(errors bool) *Exporter {
 				Name:      "http_response_in_country",
 				Help:      "Total number of in country mapping logs",
 			},
-			[]string{"host", "client_ip", "edge_ip", "is_in_country"},
+			[]string{"host", "is_in_country"}, // 2018.11.23 - Remove "client_ip", "edge_ip"
 		),
 		parseErrorsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -610,8 +610,8 @@ func (e *Exporter) HandleCollectorPost(w http.ResponseWriter, r *http.Request) {
 		// 2018.11.19 - Add httpResponseInCountry
 		e.httpResponseInCountry.WithLabelValues(
 			cloudmonitorData.Message.ReqHost,
-			cloudmonitorData.Content.Client.IP,
-			cloudmonitorData.Content.Edge.IP,
+			//cloudmonitorData.Content.Client.IP,	// 2018.11.23 - Remove to reduce /metrics data size
+			//cloudmonitorData.Content.Edge.IP,		// 2018.11.23 - Remove to reduce /metrics data size
 			cloudmonitorData.Content.Edge.IsInCountry,
 		).Add(multiplier)
 	}
